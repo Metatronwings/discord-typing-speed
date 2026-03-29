@@ -1,28 +1,36 @@
 import definePlugin from "@utils/types";
 
+const LOG = (...args: any[]) => console.log("[TypingSpeed]", ...args);
+
 // Typing session state
-let focusTime: number | null = null;    // when user focused the input box
-let firstKeyTime: number | null = null; // when first character was typed
-let lastKeyTime: number | null = null;  // when last character was typed
+let focusTime: number | null = null;
+let firstKeyTime: number | null = null;
+let lastKeyTime: number | null = null;
 let charsTyped = 0;
 
-/** Discord's main chat input: a [role="textbox"] inside a channelTextArea */
 function getChatTextbox(target: EventTarget | null): HTMLElement | null {
     if (!(target instanceof HTMLElement)) return null;
     const textbox = target.closest<HTMLElement>('[role="textbox"]');
     if (!textbox) return null;
-    // Exclude search boxes, etc. — only the main channel input
-    if (!textbox.closest('[class*="channelTextArea"]')) return null;
+    if (!textbox.closest('[class*="channelTextArea"]')) {
+        LOG("textbox found but not inside channelTextArea — skipping", textbox);
+        return null;
+    }
     return textbox;
 }
 
 function onFocusIn(e: FocusEvent) {
-    if (!getChatTextbox(e.target)) return;
-    if (focusTime === null) focusTime = Date.now();
+    const textbox = getChatTextbox(e.target);
+    if (!textbox) return;
+    if (focusTime === null) {
+        focusTime = Date.now();
+        LOG("focused chat input");
+    }
 }
 
 function onFocusOut(e: FocusEvent) {
     if (!getChatTextbox(e.target)) return;
+    LOG("blur — resetting state");
     resetState();
 }
 
@@ -30,24 +38,29 @@ function onKeyDown(e: KeyboardEvent) {
     const textbox = getChatTextbox(e.target);
     if (!textbox) return;
 
-    // On Enter (no Shift), inject stats before Discord reads the content
     if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        LOG("Enter pressed — state:", { charsTyped, firstKeyTime, lastKeyTime, focusTime });
         injectStats(textbox);
         resetState();
         return;
     }
 
-    // Count printable characters
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const now = Date.now();
-        if (firstKeyTime === null) firstKeyTime = now;
+        if (firstKeyTime === null) {
+            firstKeyTime = now;
+            LOG("first char typed");
+        }
         lastKeyTime = now;
         charsTyped++;
     }
 }
 
 function injectStats(textbox: HTMLElement) {
-    if (firstKeyTime === null || lastKeyTime === null || charsTyped <= 3) return;
+    if (firstKeyTime === null || lastKeyTime === null || charsTyped <= 3) {
+        LOG("injectStats skipped — not enough data", { charsTyped, firstKeyTime });
+        return;
+    }
 
     const totalSec = (lastKeyTime - firstKeyTime) / 1000;
     const tps = totalSec > 0 ? (charsTyped / totalSec).toFixed(1) : "—";
@@ -63,20 +76,19 @@ function injectStats(textbox: HTMLElement) {
     ];
 
     const statsText = `\n-# ⌨️ ${parts.join(" | ")}`;
+    LOG("injecting:", statsText);
 
-    // Move cursor to end of the editor, then insert via execCommand
-    // execCommand triggers Slate.js's beforeinput handler synchronously,
-    // so the modified content is what Discord reads when it processes Enter.
     const sel = window.getSelection();
     if (sel) {
         const range = document.createRange();
         range.selectNodeContents(textbox);
-        range.collapse(false); // collapse to end
+        range.collapse(false);
         sel.removeAllRanges();
         sel.addRange(range);
     }
 
-    document.execCommand("insertText", false, statsText);
+    const ok = document.execCommand("insertText", false, statsText);
+    LOG("execCommand result:", ok);
 }
 
 function resetState() {
@@ -92,12 +104,14 @@ export default definePlugin({
     authors: [],
 
     start() {
+        LOG("plugin started");
         document.addEventListener("focusin", onFocusIn, true);
         document.addEventListener("focusout", onFocusOut, true);
         document.addEventListener("keydown", onKeyDown, true);
     },
 
     stop() {
+        LOG("plugin stopped");
         document.removeEventListener("focusin", onFocusIn, true);
         document.removeEventListener("focusout", onFocusOut, true);
         document.removeEventListener("keydown", onKeyDown, true);
