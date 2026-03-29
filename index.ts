@@ -1,4 +1,4 @@
-import { MessageObject } from "@api/MessageEvents";
+import { findByProps } from "@webpack";
 import definePlugin from "@utils/types";
 
 const LOG = (...a: any[]) => console.log("[TypingSpeed]", ...a);
@@ -48,18 +48,9 @@ function onFocusIn(e: FocusEvent) {
 function onInput(e: Event) {
     const ta = getChatTextarea(e.target);
     if (!ta) return;
-
-    // User cleared the message — reset so timing doesn't bleed into next message
-    if (ta.value.length === 0) {
-        resetState();
-        return;
-    }
-
+    if (ta.value.length === 0) { resetState(); return; }
     const now = Date.now();
-    if (firstInputTime === null) {
-        firstInputTime = now;
-        LOG("first input");
-    }
+    if (firstInputTime === null) { firstInputTime = now; LOG("first input"); }
     lastInputTime = now;
     lastKnownLength = ta.value.length;
 }
@@ -69,23 +60,40 @@ export default definePlugin({
     description: "发送消息时附加模拟大模型风格的打字统计信息",
     authors: [],
 
-    onBeforeMessageSend(_channelId: string, msg: MessageObject) {
-        const stats = buildStats();
-        LOG("onBeforeMessageSend — stats:", stats);
-        if (stats) msg.content += stats;
-        resetState();
-    },
+    _origSend: null as ((...a: any[]) => any) | null,
+    _actions: null as any,
 
     start() {
         LOG("started");
+        const actions = findByProps("sendMessage", "editMessage");
+        if (!actions) { LOG("sendMessage not found — plugin inactive"); return; }
+
+        this._actions = actions;
+        this._origSend = actions.sendMessage;
+
+        actions.sendMessage = (...args: any[]) => {
+            const [channelId, message, ...rest] = args;
+            const stats = buildStats();
+            LOG("send intercepted — stats:", stats);
+            if (stats && typeof message?.content === "string") {
+                message.content += stats;
+            }
+            resetState();
+            return this._origSend!.apply(actions, [channelId, message, ...rest]);
+        };
+
+        LOG("sendMessage wrapped ✓");
         document.addEventListener("focusin", onFocusIn, true);
         document.addEventListener("input", onInput, true);
     },
 
     stop() {
-        LOG("stopped");
+        if (this._actions && this._origSend) {
+            this._actions.sendMessage = this._origSend;
+        }
         document.removeEventListener("focusin", onFocusIn, true);
         document.removeEventListener("input", onInput, true);
         resetState();
+        LOG("stopped");
     },
 });
