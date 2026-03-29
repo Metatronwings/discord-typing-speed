@@ -1,5 +1,5 @@
 import definePlugin from "@utils/types";
-import { addPreSendListener, removePreSendListener } from "@api/MessageEvents";
+import { addMessagePreSendListener, removeMessagePreSendListener } from "@api/MessageEvents";
 
 // Typing session state
 let focusTime: number | null = null;     // when user focused the input box
@@ -42,10 +42,10 @@ export default definePlugin({
     authors: [],
     dependencies: ["MessageEventsAPI"],
 
-    preSendListener: null as ReturnType<typeof addPreSendListener> | null,
+    preSendListener: null as ReturnType<typeof addMessagePreSendListener> | null,
 
     start() {
-        this.preSendListener = addPreSendListener((_channelId, msg) => {
+        this.preSendListener = addMessagePreSendListener((_channelId, msg) => {
             if (firstKeyTime !== null && lastKeyTime !== null && charsTyped > 3) {
                 const totalMs = lastKeyTime - firstKeyTime;
                 const totalSec = totalMs / 1000;
@@ -76,7 +76,7 @@ export default definePlugin({
 
     stop() {
         if (this.preSendListener) {
-            removePreSendListener(this.preSendListener);
+            removeMessagePreSendListener(this.preSendListener);
             this.preSendListener = null;
         }
         document.removeEventListener("focusin", onFocusIn, true);
