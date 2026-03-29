@@ -84,6 +84,17 @@ export default definePlugin({
         };
 
         LOG("sendMessage wrapped ✓");
+
+        // Raw diagnostic: log ALL focusin/input regardless of element
+        document.addEventListener("focusin", (e) => {
+            const t = e.target as HTMLElement;
+            LOG("RAW focusin:", t?.tagName, t?.className?.slice(0, 50));
+        }, true);
+        document.addEventListener("input", (e) => {
+            const t = e.target as HTMLElement;
+            LOG("RAW input:", t?.tagName, t?.className?.slice(0, 50));
+        }, true);
+
         document.addEventListener("focusin", onFocusIn, true);
         document.addEventListener("input", onInput, true);
     },
