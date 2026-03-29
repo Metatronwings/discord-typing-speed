@@ -7,6 +7,7 @@ let lastMutTime: number | null = null;
 let lastKnownLength = 0;
 let observer: MutationObserver | null = null;
 let currentEditor: HTMLElement | null = null;
+let hasFocus = false;
 
 function getSlateEditor(target: EventTarget | null): HTMLElement | null {
     if (!(target instanceof HTMLElement)) return null;
@@ -18,6 +19,7 @@ function attachObserver(el: HTMLElement) {
     if (observer) { observer.disconnect(); observer = null; }
     currentEditor = el;
     observer = new MutationObserver(() => {
+        if (!hasFocus) return; // ignore Discord's background DOM updates
         const len = el.textContent?.length ?? 0;
         if (len === 0) return;
         const now = Date.now();
@@ -42,6 +44,7 @@ function fullReset() {
     firstMutTime = null;
     lastMutTime = null;
     lastKnownLength = 0;
+    hasFocus = false;
     if (observer) { observer.disconnect(); observer = null; }
     currentEditor = null;
 }
@@ -49,16 +52,21 @@ function fullReset() {
 function onFocusIn(e: FocusEvent) {
     const el = getSlateEditor(e.target);
     if (!el) return;
-    // 切换到了不同的编辑器（换频道）→ 重新 attach
+    hasFocus = true;
     if (el !== currentEditor) {
         fullReset();
+        hasFocus = true;
         focusTime = Date.now();
         attachObserver(el);
         return;
     }
-    // 同一个编辑器 focus 回来
     if (!el.textContent || el.textContent.length === 0) resetTiming();
     if (focusTime === null) focusTime = Date.now();
+}
+
+function onFocusOut(e: FocusEvent) {
+    if (!getSlateEditor(e.target)) return;
+    hasFocus = false;
 }
 
 function buildStats(): string | null {
@@ -99,14 +107,20 @@ export default definePlugin({
         };
 
         document.addEventListener("focusin", onFocusIn, true);
+        document.addEventListener("focusout", onFocusOut, true);
 
         const existing = document.querySelector<HTMLElement>('[class*="slateTextArea"]');
-        if (existing) { focusTime = Date.now(); attachObserver(existing); }
+        if (existing) {
+            hasFocus = document.activeElement === existing || existing.contains(document.activeElement);
+            focusTime = Date.now();
+            attachObserver(existing);
+        }
     },
 
     stop() {
         if (this._actions && this._origSend) this._actions.sendMessage = this._origSend;
         document.removeEventListener("focusin", onFocusIn, true);
+        document.removeEventListener("focusout", onFocusOut, true);
         fullReset();
     },
 });
