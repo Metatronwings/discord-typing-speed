@@ -4,22 +4,52 @@ import definePlugin from "@utils/types";
 const LOG = (...a: any[]) => console.log("[TypingSpeed]", ...a);
 
 let focusTime: number | null = null;
-let firstInputTime: number | null = null;
-let lastInputTime: number | null = null;
+let firstMutTime: number | null = null;
+let lastMutTime: number | null = null;
 let lastKnownLength = 0;
+let observer: MutationObserver | null = null;
 
-function getChatTextarea(target: EventTarget | null): HTMLTextAreaElement | null {
-    if (!(target instanceof HTMLTextAreaElement)) return null;
-    if (!target.className.includes("textArea")) return null;
-    return target;
+function getSlateEditor(target: EventTarget | null): HTMLElement | null {
+    if (!(target instanceof HTMLElement)) return null;
+    if (target.className?.includes("slateTextArea")) return target;
+    return target.closest<HTMLElement>('[class*="slateTextArea"]');
+}
+
+function attachObserver(el: HTMLElement) {
+    if (observer) { observer.disconnect(); observer = null; }
+    observer = new MutationObserver(() => {
+        const len = el.textContent?.length ?? 0;
+        // Ignore clear-on-send (Discord empties editor before calling sendMessage)
+        if (len === 0) return;
+        const now = Date.now();
+        if (firstMutTime === null) {
+            firstMutTime = now;
+            LOG("first content change, len:", len);
+        }
+        lastMutTime = now;
+        lastKnownLength = len;
+    });
+    observer.observe(el, { characterData: true, childList: true, subtree: true });
+    LOG("observer attached to editor");
+}
+
+function onFocusIn(e: FocusEvent) {
+    const el = getSlateEditor(e.target);
+    if (!el) return;
+    if (focusTime === null) {
+        focusTime = Date.now();
+        LOG("focused");
+    }
+    // Re-attach observer each time focus enters (handles channel switches)
+    attachObserver(el);
 }
 
 function buildStats(): string | null {
-    if (firstInputTime === null || lastInputTime === null || lastKnownLength < 2) return null;
-    const totalSec = (lastInputTime - firstInputTime) / 1000;
+    if (firstMutTime === null || lastMutTime === null || lastKnownLength < 2) return null;
+    const totalSec = (lastMutTime - firstMutTime) / 1000;
     const tps = totalSec > 0 ? (lastKnownLength / totalSec).toFixed(1) : "—";
     const ttftStr = focusTime !== null
-        ? ((firstInputTime - focusTime) / 1000).toFixed(2)
+        ? ((firstMutTime - focusTime) / 1000).toFixed(2)
         : null;
     const parts = [
         `Out: ${lastKnownLength}t`,
@@ -32,28 +62,10 @@ function buildStats(): string | null {
 
 function resetState() {
     focusTime = null;
-    firstInputTime = null;
-    lastInputTime = null;
+    firstMutTime = null;
+    lastMutTime = null;
     lastKnownLength = 0;
-}
-
-function onFocusIn(e: FocusEvent) {
-    if (!getChatTextarea(e.target)) return;
-    if (focusTime === null) {
-        focusTime = Date.now();
-        LOG("focused");
-    }
-}
-
-function onInput(e: Event) {
-    const ta = getChatTextarea(e.target);
-    if (!ta) return;
-    // Ignore the clear that Discord fires when sending — state is consumed by sendMessage
-    if (ta.value.length === 0) return;
-    const now = Date.now();
-    if (firstInputTime === null) { firstInputTime = now; LOG("first input"); }
-    lastInputTime = now;
-    lastKnownLength = ta.value.length;
+    if (observer) { observer.disconnect(); observer = null; }
 }
 
 export default definePlugin({
@@ -66,12 +78,11 @@ export default definePlugin({
 
     start() {
         LOG("started");
-        const actions = findByProps("sendMessage", "editMessage");
-        if (!actions) { LOG("sendMessage not found — plugin inactive"); return; }
 
+        const actions = findByProps("sendMessage", "editMessage");
+        if (!actions) { LOG("sendMessage not found"); return; }
         this._actions = actions;
         this._origSend = actions.sendMessage;
-
         actions.sendMessage = (...args: any[]) => {
             const [channelId, message, ...rest] = args;
             const stats = buildStats();
@@ -82,29 +93,22 @@ export default definePlugin({
             resetState();
             return this._origSend!.apply(actions, [channelId, message, ...rest]);
         };
-
         LOG("sendMessage wrapped ✓");
 
-        // Raw diagnostic: log ALL focusin/input regardless of element
-        document.addEventListener("focusin", (e) => {
-            const t = e.target as HTMLElement;
-            LOG("RAW focusin:", t?.tagName, t?.className?.slice(0, 50));
-        }, true);
-        document.addEventListener("input", (e) => {
-            const t = e.target as HTMLElement;
-            LOG("RAW input:", t?.tagName, t?.className?.slice(0, 50));
-        }, true);
-
         document.addEventListener("focusin", onFocusIn, true);
-        document.addEventListener("input", onInput, true);
+
+        // If editor is already focused on startup, attach observer immediately
+        const existing = document.querySelector<HTMLElement>('[class*="slateTextArea"]');
+        if (existing) {
+            focusTime = Date.now();
+            attachObserver(existing);
+            LOG("attached to existing editor on startup");
+        }
     },
 
     stop() {
-        if (this._actions && this._origSend) {
-            this._actions.sendMessage = this._origSend;
-        }
+        if (this._actions && this._origSend) this._actions.sendMessage = this._origSend;
         document.removeEventListener("focusin", onFocusIn, true);
-        document.removeEventListener("input", onInput, true);
         resetState();
         LOG("stopped");
     },
