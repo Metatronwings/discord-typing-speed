@@ -32,15 +32,14 @@ function onFocusIn(e: FocusEvent) {
     const el = getSlateEditor(e.target);
     if (!el) return;
     hasFocus = true;
+    // Always restart TTFT from this focus event
+    focusTime = Date.now();
+    firstKeyTime = null;
     if (el !== currentEditor) {
-        fullReset();
-        hasFocus = true;
-        focusTime = Date.now();
+        lastMutTime = null;
+        lastKnownLength = 0;
         attachObserver(el);
-        return;
     }
-    if (!el.textContent || el.textContent.length === 0) resetTiming();
-    if (focusTime === null) focusTime = Date.now();
 }
 
 function onFocusOut(e: FocusEvent) {
