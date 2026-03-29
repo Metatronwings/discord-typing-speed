@@ -11,11 +11,14 @@ let charsTyped = 0;
 function getChatTextbox(target: EventTarget | null): HTMLElement | null {
     if (!(target instanceof HTMLElement)) return null;
     const textbox = target.closest<HTMLElement>('[role="textbox"]');
-    if (!textbox) return null;
-    if (!textbox.closest('[class*="channelTextArea"]')) {
-        LOG("textbox found but not inside channelTextArea — skipping", textbox);
+    if (!textbox) {
+        // Log first focusin miss to inspect actual DOM structure
+        if (target instanceof HTMLElement && target === document.activeElement) {
+            LOG("focusin miss — target tag/role/class:", target.tagName, target.getAttribute("role"), target.className);
+        }
         return null;
     }
+    LOG("textbox found, parent classes:", textbox.parentElement?.className);
     return textbox;
 }
 
