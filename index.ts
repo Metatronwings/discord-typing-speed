@@ -6,15 +6,11 @@ const LOG = (...a: any[]) => console.log("[TypingSpeed]", ...a);
 let focusTime: number | null = null;
 let firstInputTime: number | null = null;
 let lastInputTime: number | null = null;
-let lastKnownLength = 0;       // snapshot of textarea.value.length, updated on each input
-let pendingStats: string | null = null;
+let lastKnownLength = 0;
 
 function getChatTextarea(target: EventTarget | null): HTMLTextAreaElement | null {
     if (!(target instanceof HTMLTextAreaElement)) return null;
-    if (!target.className.includes("textArea")) {
-        LOG("textarea miss — class:", target.className);
-        return null;
-    }
+    if (!target.className.includes("textArea")) return null;
     return target;
 }
 
@@ -39,7 +35,6 @@ function resetState() {
     firstInputTime = null;
     lastInputTime = null;
     lastKnownLength = 0;
-    pendingStats = null;
 }
 
 function onFocusIn(e: FocusEvent) {
@@ -50,17 +45,16 @@ function onFocusIn(e: FocusEvent) {
     }
 }
 
-function onFocusOut(e: FocusEvent) {
-    if (!getChatTextarea(e.target)) return;
-    const stats = buildStats();
-    LOG("blur — pendingStats:", stats, "length:", lastKnownLength);
-    resetState();
-    pendingStats = stats;
-}
-
 function onInput(e: Event) {
     const ta = getChatTextarea(e.target);
     if (!ta) return;
+
+    // User cleared the message — reset so timing doesn't bleed into next message
+    if (ta.value.length === 0) {
+        resetState();
+        return;
+    }
+
     const now = Date.now();
     if (firstInputTime === null) {
         firstInputTime = now;
@@ -76,23 +70,21 @@ export default definePlugin({
     authors: [],
 
     onBeforeMessageSend(_channelId: string, msg: MessageObject) {
-        LOG("onBeforeMessageSend — pendingStats:", pendingStats);
-        if (pendingStats) {
-            msg.content += pendingStats;
-        }
+        const stats = buildStats();
+        LOG("onBeforeMessageSend — stats:", stats);
+        if (stats) msg.content += stats;
         resetState();
     },
 
     start() {
         LOG("started");
         document.addEventListener("focusin", onFocusIn, true);
-        document.addEventListener("focusout", onFocusOut, true);
         document.addEventListener("input", onInput, true);
     },
 
     stop() {
+        LOG("stopped");
         document.removeEventListener("focusin", onFocusIn, true);
-        document.removeEventListener("focusout", onFocusOut, true);
         document.removeEventListener("input", onInput, true);
         resetState();
     },
