@@ -65,9 +65,8 @@ function buildStats(): string | null {
     if (firstMutTime === null || lastMutTime === null || lastKnownLength < 2) return null;
     const totalSec = (lastMutTime - firstMutTime) / 1000;
     const tps = totalSec > 0 ? (lastKnownLength / totalSec).toFixed(1) : "—";
-    const ttftStr = focusTime !== null
-        ? ((firstMutTime - focusTime) / 1000).toFixed(2)
-        : null;
+    const ttft = focusTime !== null ? (firstMutTime - focusTime) / 1000 : null;
+    const ttftStr = ttft !== null && ttft > 0.5 ? ttft.toFixed(2) : null;
     const parts = [
         `Out: ${lastKnownLength}t`,
         `Time: ${totalSec.toFixed(2)}s`,
