@@ -29,6 +29,8 @@ function attachObserver(el: HTMLElement) {
 function onFocusIn(e: FocusEvent) {
     const el = getSlateEditor(e.target);
     if (!el) return;
+    // Empty editor means new session (cleared text or channel switch) — reset timing
+    if (!el.textContent || el.textContent.length === 0) resetState();
     if (focusTime === null) focusTime = Date.now();
     attachObserver(el);
 }
