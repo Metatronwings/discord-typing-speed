@@ -48,7 +48,8 @@ export default definePlugin({
 
                 // Sanity filter: ignore implausible values
                 if (wpm > 0 && wpm < 500) {
-                    msg.content += ` ⌨️ ${wpm} WPM`;
+                    const elapsedSec = ((Date.now() - typingStartTime!) / 1000).toFixed(2);
+                    msg.content += `\n-# ⌨️ WPM: ${wpm} | Time: ${elapsedSec}s | Chars: ${charsTyped}`;
                 }
             }
             resetState();
