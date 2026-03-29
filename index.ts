@@ -1,6 +1,8 @@
 import { MessageObject } from "@api/MessageEvents";
 import definePlugin from "@utils/types";
 
+const LOG = (...a: any[]) => console.log("[TypingSpeed]", ...a);
+
 let focusTime: number | null = null;
 let firstInputTime: number | null = null;
 let lastInputTime: number | null = null;
@@ -9,7 +11,10 @@ let pendingStats: string | null = null;
 
 function getChatTextarea(target: EventTarget | null): HTMLTextAreaElement | null {
     if (!(target instanceof HTMLTextAreaElement)) return null;
-    if (!target.className.includes("textArea")) return null;
+    if (!target.className.includes("textArea")) {
+        LOG("textarea miss — class:", target.className);
+        return null;
+    }
     return target;
 }
 
@@ -39,24 +44,28 @@ function resetState() {
 
 function onFocusIn(e: FocusEvent) {
     if (!getChatTextarea(e.target)) return;
-    if (focusTime === null) focusTime = Date.now();
+    if (focusTime === null) {
+        focusTime = Date.now();
+        LOG("focused");
+    }
 }
 
 function onFocusOut(e: FocusEvent) {
     if (!getChatTextarea(e.target)) return;
-    // Pre-calculate before resetState wipes the data.
-    // Discord fires blur before onBeforeMessageSend, so we save it here
-    // and let onBeforeMessageSend pick it up.
     const stats = buildStats();
+    LOG("blur — pendingStats:", stats, "length:", lastKnownLength);
     resetState();
-    pendingStats = stats; // restore after reset
+    pendingStats = stats;
 }
 
 function onInput(e: Event) {
     const ta = getChatTextarea(e.target);
     if (!ta) return;
     const now = Date.now();
-    if (firstInputTime === null) firstInputTime = now;
+    if (firstInputTime === null) {
+        firstInputTime = now;
+        LOG("first input");
+    }
     lastInputTime = now;
     lastKnownLength = ta.value.length;
 }
@@ -67,6 +76,7 @@ export default definePlugin({
     authors: [],
 
     onBeforeMessageSend(_channelId: string, msg: MessageObject) {
+        LOG("onBeforeMessageSend — pendingStats:", pendingStats);
         if (pendingStats) {
             msg.content += pendingStats;
         }
@@ -74,6 +84,7 @@ export default definePlugin({
     },
 
     start() {
+        LOG("started");
         document.addEventListener("focusin", onFocusIn, true);
         document.addEventListener("focusout", onFocusOut, true);
         document.addEventListener("input", onInput, true);
