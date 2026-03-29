@@ -51,10 +51,6 @@ pnpm buildWeb
 3. 点击**加载已解压的扩展程序**
 4. 选择 `dist/chromium-unpacked/` 目录
 
-WSL 用户可以直接填路径：
-```
-\\wsl$\Debian\home\<user>\Vencord\dist\chromium-unpacked
-```
 
 ### 5. 启用插件
 
