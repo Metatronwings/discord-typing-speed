@@ -2,8 +2,8 @@ import { findByProps } from "@webpack";
 import definePlugin from "@utils/types";
 
 let focusTime: number | null = null;
-let firstMutTime: number | null = null;
-let lastMutTime: number | null = null;
+let firstKeyTime: number | null = null; // set by actual key/composition input
+let lastMutTime: number | null = null;  // set by MutationObserver
 let lastKnownLength = 0;
 let observer: MutationObserver | null = null;
 let currentEditor: HTMLElement | null = null;
@@ -19,34 +19,13 @@ function attachObserver(el: HTMLElement) {
     if (observer) { observer.disconnect(); observer = null; }
     currentEditor = el;
     observer = new MutationObserver(() => {
-        if (!hasFocus) return; // ignore Discord's background DOM updates
+        if (!hasFocus) return;
         const len = el.textContent?.length ?? 0;
         if (len === 0) return;
-        const now = Date.now();
-        if (firstMutTime === null) firstMutTime = now;
-        lastMutTime = now;
+        lastMutTime = Date.now();
         lastKnownLength = len;
     });
     observer.observe(el, { characterData: true, childList: true, subtree: true });
-}
-
-/** 只重置计时，不断开 observer（用于连续发消息）*/
-function resetTiming() {
-    focusTime = Date.now(); // 下一条消息的 TTFT 从本次发送完算起
-    firstMutTime = null;
-    lastMutTime = null;
-    lastKnownLength = 0;
-}
-
-/** 完全重置，断开 observer（用于插件停止或切换频道）*/
-function fullReset() {
-    focusTime = null;
-    firstMutTime = null;
-    lastMutTime = null;
-    lastKnownLength = 0;
-    hasFocus = false;
-    if (observer) { observer.disconnect(); observer = null; }
-    currentEditor = null;
 }
 
 function onFocusIn(e: FocusEvent) {
@@ -69,11 +48,27 @@ function onFocusOut(e: FocusEvent) {
     hasFocus = false;
 }
 
+/** 用户真实开始输入时设 firstKeyTime（用于 TTFT） */
+function markFirstKey() {
+    if (hasFocus && firstKeyTime === null) firstKeyTime = Date.now();
+}
+
+function onKeyDown(e: KeyboardEvent) {
+    if (!getSlateEditor(e.target) || !hasFocus) return;
+    // 可打印字符（非 IME 模式）
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) markFirstKey();
+}
+
+function onCompositionStart(e: CompositionEvent) {
+    if (!getSlateEditor(e.target)) return;
+    markFirstKey();
+}
+
 function buildStats(): string | null {
-    if (firstMutTime === null || lastMutTime === null || lastKnownLength < 2) return null;
-    const totalSec = (lastMutTime - firstMutTime) / 1000;
+    if (firstKeyTime === null || lastMutTime === null || lastKnownLength < 2) return null;
+    const totalSec = (lastMutTime - firstKeyTime) / 1000;
     const tps = totalSec > 0 ? (lastKnownLength / totalSec).toFixed(1) : "—";
-    const ttft = focusTime !== null ? (firstMutTime - focusTime) / 1000 : null;
+    const ttft = focusTime !== null ? (firstKeyTime - focusTime) / 1000 : null;
     const ttftStr = ttft !== null && ttft > 0.5 ? ttft.toFixed(2) : null;
     const parts = [
         `Out: ${lastKnownLength}t`,
@@ -82,6 +77,23 @@ function buildStats(): string | null {
         ...(ttftStr !== null ? [`TTFT: ${ttftStr}s`] : []),
     ];
     return `\n-# ⌨️ ${parts.join(" | ")}`;
+}
+
+function resetTiming() {
+    focusTime = Date.now();
+    firstKeyTime = null;
+    lastMutTime = null;
+    lastKnownLength = 0;
+}
+
+function fullReset() {
+    focusTime = null;
+    firstKeyTime = null;
+    lastMutTime = null;
+    lastKnownLength = 0;
+    hasFocus = false;
+    if (observer) { observer.disconnect(); observer = null; }
+    currentEditor = null;
 }
 
 export default definePlugin({
@@ -101,17 +113,18 @@ export default definePlugin({
             const [channelId, message, ...rest] = args;
             const stats = buildStats();
             if (stats && typeof message?.content === "string") message.content += stats;
-            // 只重置计时，observer 保持运行，连续发消息也没问题
             resetTiming();
             return this._origSend!.apply(actions, [channelId, message, ...rest]);
         };
 
         document.addEventListener("focusin", onFocusIn, true);
         document.addEventListener("focusout", onFocusOut, true);
+        document.addEventListener("keydown", onKeyDown, true);
+        document.addEventListener("compositionstart", onCompositionStart, true);
 
         const existing = document.querySelector<HTMLElement>('[class*="slateTextArea"]');
         if (existing) {
-            hasFocus = document.activeElement === existing || existing.contains(document.activeElement);
+            hasFocus = existing.contains(document.activeElement) || document.activeElement === existing;
             focusTime = Date.now();
             attachObserver(existing);
         }
@@ -121,6 +134,8 @@ export default definePlugin({
         if (this._actions && this._origSend) this._actions.sendMessage = this._origSend;
         document.removeEventListener("focusin", onFocusIn, true);
         document.removeEventListener("focusout", onFocusOut, true);
+        document.removeEventListener("keydown", onKeyDown, true);
+        document.removeEventListener("compositionstart", onCompositionStart, true);
         fullReset();
     },
 });
