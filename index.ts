@@ -6,6 +6,7 @@ let firstMutTime: number | null = null;
 let lastMutTime: number | null = null;
 let lastKnownLength = 0;
 let observer: MutationObserver | null = null;
+let currentEditor: HTMLElement | null = null;
 
 function getSlateEditor(target: EventTarget | null): HTMLElement | null {
     if (!(target instanceof HTMLElement)) return null;
@@ -29,6 +30,7 @@ function attachObserver(el: HTMLElement) {
 function onFocusIn(e: FocusEvent) {
     const el = getSlateEditor(e.target);
     if (!el) return;
+    currentEditor = el;
     // Empty editor means new session (cleared text or channel switch) — reset timing
     if (!el.textContent || el.textContent.length === 0) resetState();
     if (focusTime === null) focusTime = Date.now();
@@ -57,6 +59,7 @@ function resetState() {
     lastMutTime = null;
     lastKnownLength = 0;
     if (observer) { observer.disconnect(); observer = null; }
+    // Note: currentEditor is intentionally kept — needed to re-attach after send
 }
 
 export default definePlugin({
@@ -77,18 +80,24 @@ export default definePlugin({
             const stats = buildStats();
             if (stats && typeof message?.content === "string") message.content += stats;
             resetState();
+            // Editor keeps focus after send — re-attach observer for the next message
+            if (currentEditor) {
+                focusTime = Date.now();
+                attachObserver(currentEditor);
+            }
             return this._origSend!.apply(actions, [channelId, message, ...rest]);
         };
 
         document.addEventListener("focusin", onFocusIn, true);
 
         const existing = document.querySelector<HTMLElement>('[class*="slateTextArea"]');
-        if (existing) { focusTime = Date.now(); attachObserver(existing); }
+        if (existing) { currentEditor = existing; focusTime = Date.now(); attachObserver(existing); }
     },
 
     stop() {
         if (this._actions && this._origSend) this._actions.sendMessage = this._origSend;
         document.removeEventListener("focusin", onFocusIn, true);
         resetState();
+        currentEditor = null;
     },
 });
