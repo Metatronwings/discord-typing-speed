@@ -48,7 +48,8 @@ function onFocusIn(e: FocusEvent) {
 function onInput(e: Event) {
     const ta = getChatTextarea(e.target);
     if (!ta) return;
-    if (ta.value.length === 0) { resetState(); return; }
+    // Ignore the clear that Discord fires when sending — state is consumed by sendMessage
+    if (ta.value.length === 0) return;
     const now = Date.now();
     if (firstInputTime === null) { firstInputTime = now; LOG("first input"); }
     lastInputTime = now;
