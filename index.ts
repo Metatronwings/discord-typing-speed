@@ -1,8 +1,6 @@
 import { findByProps } from "@webpack";
 import definePlugin from "@utils/types";
 
-const LOG = (...a: any[]) => console.log("[TypingSpeed]", ...a);
-
 let focusTime: number | null = null;
 let firstMutTime: number | null = null;
 let lastMutTime: number | null = null;
@@ -19,28 +17,19 @@ function attachObserver(el: HTMLElement) {
     if (observer) { observer.disconnect(); observer = null; }
     observer = new MutationObserver(() => {
         const len = el.textContent?.length ?? 0;
-        // Ignore clear-on-send (Discord empties editor before calling sendMessage)
         if (len === 0) return;
         const now = Date.now();
-        if (firstMutTime === null) {
-            firstMutTime = now;
-            LOG("first content change, len:", len);
-        }
+        if (firstMutTime === null) firstMutTime = now;
         lastMutTime = now;
         lastKnownLength = len;
     });
     observer.observe(el, { characterData: true, childList: true, subtree: true });
-    LOG("observer attached to editor");
 }
 
 function onFocusIn(e: FocusEvent) {
     const el = getSlateEditor(e.target);
     if (!el) return;
-    if (focusTime === null) {
-        focusTime = Date.now();
-        LOG("focused");
-    }
-    // Re-attach observer each time focus enters (handles channel switches)
+    if (focusTime === null) focusTime = Date.now();
     attachObserver(el);
 }
 
@@ -77,39 +66,27 @@ export default definePlugin({
     _actions: null as any,
 
     start() {
-        LOG("started");
-
         const actions = findByProps("sendMessage", "editMessage");
-        if (!actions) { LOG("sendMessage not found"); return; }
+        if (!actions) return;
         this._actions = actions;
         this._origSend = actions.sendMessage;
         actions.sendMessage = (...args: any[]) => {
             const [channelId, message, ...rest] = args;
             const stats = buildStats();
-            LOG("send intercepted — stats:", stats);
-            if (stats && typeof message?.content === "string") {
-                message.content += stats;
-            }
+            if (stats && typeof message?.content === "string") message.content += stats;
             resetState();
             return this._origSend!.apply(actions, [channelId, message, ...rest]);
         };
-        LOG("sendMessage wrapped ✓");
 
         document.addEventListener("focusin", onFocusIn, true);
 
-        // If editor is already focused on startup, attach observer immediately
         const existing = document.querySelector<HTMLElement>('[class*="slateTextArea"]');
-        if (existing) {
-            focusTime = Date.now();
-            attachObserver(existing);
-            LOG("attached to existing editor on startup");
-        }
+        if (existing) { focusTime = Date.now(); attachObserver(existing); }
     },
 
     stop() {
         if (this._actions && this._origSend) this._actions.sendMessage = this._origSend;
         document.removeEventListener("focusin", onFocusIn, true);
         resetState();
-        LOG("stopped");
     },
 });
