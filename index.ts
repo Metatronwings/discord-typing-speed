@@ -7,6 +7,7 @@ let focusTime: number | null = null;
 let firstInputTime: number | null = null;
 let lastInputTime: number | null = null;
 let charsTyped = 0;
+let resetTimer: ReturnType<typeof setTimeout> | null = null;
 
 function getChatTextarea(target: EventTarget | null): HTMLTextAreaElement | null {
     if (!(target instanceof HTMLTextAreaElement)) return null;
@@ -24,8 +25,13 @@ function onFocusIn(e: FocusEvent) {
 
 function onFocusOut(e: FocusEvent) {
     if (!getChatTextarea(e.target)) return;
-    LOG("blur — reset");
-    resetState();
+    // Delay reset: Discord fires blur BEFORE onBeforeMessageSend,
+    // so we give onBeforeMessageSend a chance to cancel this timer first.
+    resetTimer = setTimeout(() => {
+        LOG("blur — reset (delayed)");
+        resetState();
+        resetTimer = null;
+    }, 500);
 }
 
 function onInput(e: Event) {
@@ -48,6 +54,10 @@ function onInput(e: Event) {
 }
 
 function resetState() {
+    if (resetTimer !== null) {
+        clearTimeout(resetTimer);
+        resetTimer = null;
+    }
     focusTime = null;
     firstInputTime = null;
     lastInputTime = null;
@@ -60,6 +70,11 @@ export default definePlugin({
     authors: [],
 
     onBeforeMessageSend(_channelId: string, msg: MessageObject) {
+        // Cancel pending blur-reset so we still have the data
+        if (resetTimer !== null) {
+            clearTimeout(resetTimer);
+            resetTimer = null;
+        }
         LOG("onBeforeMessageSend — chars:", charsTyped, "content:", msg.content.slice(0, 30));
 
         if (firstInputTime !== null && lastInputTime !== null && charsTyped > 1) {
