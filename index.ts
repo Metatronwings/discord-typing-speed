@@ -8,42 +8,35 @@ let firstKeyTime: number | null = null;
 let lastKeyTime: number | null = null;
 let charsTyped = 0;
 
-function getChatTextbox(target: EventTarget | null): HTMLElement | null {
-    if (!(target instanceof HTMLElement)) return null;
-    const textbox = target.closest<HTMLElement>('[role="textbox"]');
-    if (!textbox) {
-        // Log first focusin miss to inspect actual DOM structure
-        if (target instanceof HTMLElement && target === document.activeElement) {
-            LOG("focusin miss — target tag/role/class:", target.tagName, target.getAttribute("role"), target.className);
-        }
-        return null;
-    }
-    LOG("textbox found, parent classes:", textbox.parentElement?.className);
-    return textbox;
+/** Discord's chat textarea has a class name starting with "textArea" */
+function getChatTextarea(target: EventTarget | null): HTMLTextAreaElement | null {
+    if (!(target instanceof HTMLTextAreaElement)) return null;
+    if (!target.className.includes("textArea")) return null;
+    return target;
 }
 
 function onFocusIn(e: FocusEvent) {
-    const textbox = getChatTextbox(e.target);
-    if (!textbox) return;
+    const ta = getChatTextarea(e.target);
+    if (!ta) return;
     if (focusTime === null) {
         focusTime = Date.now();
-        LOG("focused chat input");
+        LOG("focused chat textarea");
     }
 }
 
 function onFocusOut(e: FocusEvent) {
-    if (!getChatTextbox(e.target)) return;
+    if (!getChatTextarea(e.target)) return;
     LOG("blur — resetting state");
     resetState();
 }
 
 function onKeyDown(e: KeyboardEvent) {
-    const textbox = getChatTextbox(e.target);
-    if (!textbox) return;
+    const ta = getChatTextarea(e.target);
+    if (!ta) return;
 
     if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        LOG("Enter pressed — state:", { charsTyped, firstKeyTime, lastKeyTime, focusTime });
-        injectStats(textbox);
+        LOG("Enter — state:", { charsTyped, firstKeyTime, lastKeyTime, focusTime });
+        injectStats(ta);
         resetState();
         return;
     }
@@ -59,9 +52,9 @@ function onKeyDown(e: KeyboardEvent) {
     }
 }
 
-function injectStats(textbox: HTMLElement) {
+function injectStats(ta: HTMLTextAreaElement) {
     if (firstKeyTime === null || lastKeyTime === null || charsTyped <= 3) {
-        LOG("injectStats skipped — not enough data", { charsTyped, firstKeyTime });
+        LOG("skipped — not enough data", { charsTyped });
         return;
     }
 
@@ -81,17 +74,22 @@ function injectStats(textbox: HTMLElement) {
     const statsText = `\n-# ⌨️ ${parts.join(" | ")}`;
     LOG("injecting:", statsText);
 
-    const sel = window.getSelection();
-    if (sel) {
-        const range = document.createRange();
-        range.selectNodeContents(textbox);
-        range.collapse(false);
-        sel.removeAllRanges();
-        sel.addRange(range);
-    }
+    // React controls the textarea via a synthetic value — need to trigger
+    // React's change handler by calling the native setter, then firing input.
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype, "value"
+    )?.set;
 
-    const ok = document.execCommand("insertText", false, statsText);
-    LOG("execCommand result:", ok);
+    if (nativeSetter) {
+        nativeSetter.call(ta, ta.value + statsText);
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        LOG("injected via native setter ✓");
+    } else {
+        // Fallback: cursor-based execCommand
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+        const ok = document.execCommand("insertText", false, statsText);
+        LOG("injected via execCommand:", ok);
+    }
 }
 
 function resetState() {
