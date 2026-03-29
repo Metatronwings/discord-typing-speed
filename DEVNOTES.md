@@ -90,20 +90,61 @@ Discord 一旦更新 bundle，正则就可能失配，patch 静默失败，`onBe
 
 ---
 
+## 连续发消息时 MutationObserver 丢失
+
+发送后调用 `resetState()` 断开了 observer，但 Discord 发完消息不会 blur 输入框，所以 `onFocusIn` 不会重新触发，observer 就再也不 attach 了。第二条消息没有任何监听。
+
+**修复：** 把重置拆成两个函数：
+- `resetTiming()`：只清计时变量，**保留 observer**（发消息后调用）
+- `fullReset()`：断开 observer，完全清空（插件停止 / 切换频道时调用）
+
+---
+
+## TTFT 不准：Discord 后台 DOM 更新触发 Observer
+
+加了 `hasFocus` 标记后，理论上 blur 时不更新计时。但实测发现：**获得焦点的瞬间 Discord 会触发一次 DOM 更新**（如光标位置、aria 属性），导致 MutationObserver 立刻把 `firstMutTime` 设成了 focus 的同一瞬间，TTFT ≈ 0，被过滤掉。
+
+**修复：** 分离两个职责：
+- `firstKeyTime`（TTFT 的起点）：由 `keydown` 和 `compositionstart` 设置，只有真实按键才触发
+- `lastKnownLength` / `lastMutTime`：由 MutationObserver 设置
+
+这样 TTFT = `firstKeyTime - focusTime`，完全不受 Discord 后台 DOM 更新影响。
+
+---
+
+## focusTime 未随 refocus 更新
+
+失焦再点回来时，`focusTime` 还是上次发送时的值（`resetTiming` 设的），导致 TTFT 把"上次发完到这次开始打"的全部时间都算进去，远大于用户体感。
+
+**修复：** `onFocusIn` 里无条件刷新 `focusTime = Date.now()` 并清空 `firstKeyTime`。TTFT 永远只量**这次点击输入框 → 第一次按键**的时间，和历史状态完全解耦。
+
+---
+
 ## 最终架构
 
 ```
 focusin (capture)
-  → 找到 slateTextArea div
-  → attach MutationObserver
-  → 记录 focusTime（TTFT 起点）
+  → 找到 slateTextArea div（class 含 "slateTextArea"）
+  → hasFocus = true
+  → focusTime = Date.now()，firstKeyTime = null（始终刷新）
+  → 若切换频道：fullReset + attachObserver
 
-MutationObserver (on editor DOM change)
-  → 记录 firstMutTime、lastMutTime、lastKnownLength
-  → len=0 时忽略（Discord 发送前清空）
+focusout (capture)
+  → hasFocus = false
+
+keydown / compositionstart (capture)
+  → 首次触发时设 firstKeyTime（TTFT 起点，仅真实输入）
+
+MutationObserver (on editor DOM)
+  → hasFocus 为 false 时忽略（避免后台更新干扰）
+  → len=0 时忽略（Discord 发送前清空编辑器）
+  → 更新 lastMutTime、lastKnownLength
 
 sendMessage wrapper (findByProps)
-  → buildStats() 计算统计
+  → buildStats()：
+      Time  = lastMutTime - firstKeyTime
+      t/s   = lastKnownLength / Time
+      TTFT  = firstKeyTime - focusTime（> 0.5s 才显示）
   → append 到 message.content
-  → resetState()
+  → resetTiming()（保留 observer，重置计时）
 ```
